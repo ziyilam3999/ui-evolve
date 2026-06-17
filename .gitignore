@@ -12,6 +12,10 @@ npm-debug.log*
 /playwright-report/
 /blob-report/
 
+# Agent / tooling session scratch (never ship to this public repo)
+.ai-workspace/
+.claude/
+
 # Build / quarantine scratch + macOS
 _quarantine*
 .DS_Store
