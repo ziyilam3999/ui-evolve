@@ -77,16 +77,19 @@ Then invoke it from Claude Code: `/ui-evolve <path-to-your-web-project>`.
 | `references/judge-prompt.md` | The vision-judge subagent prompt template. |
 | `references/round-workflow.mjs` | The per-round research fan-out (a Claude Code Workflow). |
 | `tools/measure.mjs` | Objective metrics: Lighthouse + axe-core + lab vitals. |
-| `tools/` (roadmap) | `capture`, `regression`, `score`, `serve` — see below. |
-| `evals/` (roadmap) | The CI discriminator self-test. |
+| `tools/serve.mjs` | Boot / poll / teardown the target server. |
+| `tools/capture.mjs` | Playwright screenshots per breakpoint + responsive overflow detection. |
+| `tools/regression.mjs` | Pixel-diff vs the last accepted round. |
+| `tools/score.mjs` | Combine metrics + judge into `roundScore` + the accept/revert decision. |
+| `evals/discriminates.test.mjs` | The CI discriminator self-test. |
 
 ## Roadmap
 
 This repo is built in the open, one release per slice:
 
-- **0.1.0** — public scaffold + the skill spec + the objective-metrics tool. *(this release)*
+- **0.1.0** — public scaffold + the skill spec + the objective-metrics tool.
 - **0.2.0** — the rest of the harness (`capture`, `regression`, `score`, `serve`) + a
-  CI **discriminator self-test** (the scorer must order a worse UI below a better one).
+  CI **discriminator self-test** (the scorer must order a worse UI below a better one). *(this release)*
 - **0.3.0+** — dogfooded on a real site; the run's evidence becomes a documented case study.
 
 See `CHANGELOG.md` for what shipped in each release.
