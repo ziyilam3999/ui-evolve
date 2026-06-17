@@ -93,9 +93,9 @@ See `CHANGELOG.md` for what shipped in each release.
 
 ## Contributing
 
-Branch → PR → CI (lint + dependency resolution; the behavioral self-test joins in 0.2.0)
-→ review → squash merge. Conventional Commits; add a `CHANGELOG.md` bullet for
-user-facing changes. See the PR template.
+Branch → PR → CI (lint + the discriminator self-test + dependency resolution) → review
+→ squash merge. Conventional Commits; add a `CHANGELOG.md` bullet for user-facing
+changes. See the PR template.
 
 ## License
 
