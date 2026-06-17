@@ -1,6 +1,6 @@
 {
   "name": "ui-evolve",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "type": "module",
   "license": "MIT",
@@ -21,7 +21,9 @@
     "url": "https://github.com/ziyilam3999/ui-evolve.git"
   },
   "scripts": {
-    "lint": "node scripts/lint.mjs"
+    "lint": "node scripts/lint.mjs",
+    "selftest": "node evals/discriminates.test.mjs",
+    "test": "node evals/discriminates.test.mjs"
   },
   "engines": {
     "node": ">=20"

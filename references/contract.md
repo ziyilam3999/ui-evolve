@@ -22,7 +22,9 @@ single-file ESM Node scripts run from `tools/` (deps in `tools/package.json`). A
     ...
 ```
 
-`<page-slug>` = the route with `/`→`_` (`/` → `home`). `<breakpoint>` = config breakpoint `name`.
+`<page-slug>` = the route with each `/` replaced by `_`, then any leading `_` stripped, with the
+root route `/` mapped to `home` (so `/` → `home`, `/about` → `about`, `/a/b` → `a_b`).
+`<breakpoint>` = config breakpoint `name`.
 
 ## metrics.json  (written by measure.mjs; responsive block by capture.mjs, merged)
 

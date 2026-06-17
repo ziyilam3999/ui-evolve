@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-06-17
+
+### Added
+
+* The rest of the validation harness:
+  * `tools/serve.mjs` — boots the target server, polls its URL until ready, records the
+    PID, and tears down (`--down`); dependency-free, idempotent teardown.
+  * `tools/capture.mjs` — Playwright full-page screenshots at each breakpoint +
+    responsive overflow/clip detection, merged into `metrics.json`.
+  * `tools/regression.mjs` — pixel-diff (pixelmatch) of a round's screenshots vs the
+    last accepted round → `regression.json` (per-shot `changedPct`/`changedPx`).
+  * `tools/score.mjs` — the scorer: combines metrics + judge (+ regression) into
+    `round.json` with `roundScore` and the accept/revert decision. Exposes a pure
+    `computeRound()` plus a CLI.
+* `evals/discriminates.test.mjs` — the **CI discriminator self-test**: a pure,
+  deterministic check (no network/Chrome/agent) asserting the scorer orders a worse UI
+  below a better one, reverts an accessibility regression, accepts a genuine
+  improvement, and scores a perfect site ~100 (proving the weights sum to 1.0).
+* CI now runs the self-test on every PR (`selftest` job); `npm run selftest` runs it
+  locally. `tools/package-lock.json` pins the harness dependency tree for reproducible
+  installs.
+
+> The full end-to-end loop (real Lighthouse + a real vision-judge against a served page)
+> is an operator-run acceptance check — CI can't host a browser+agent. See `SKILL.md`.
+
 ## [0.1.0] — 2026-06-17
 
 ### Added

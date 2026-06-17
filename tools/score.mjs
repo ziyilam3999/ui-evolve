@@ -1,0 +1,289 @@
+#!/usr/bin/env node
+// score.mjs — turns a round's metrics.json + judge.json (+ optional regression.json) into round.json
+// per the contract (### roundScore formula / ### accept / revert decision). Pure scorer + CLI wrapper.
+//
+//   node tools/score.mjs --round <round-dir> [--prev <prev-accepted-round-dir>] \
+//                        [--config <config.json>] [--build-pass true|false]
+//
+// computeRound() is a PURE function (no I/O, deterministic) — the self-test imports it. The CLI reads
+// the round's files, calls computeRound(), writes <round-dir>/round.json (2-space). Fails closed on
+// malformed input (bad JSON => non-zero, nothing written).
+
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+
+// ── scoring weights (MUST sum to 1.0 so a perfect site scores 100) ──────────────
+const LH_WEIGHTS = { accessibility: 0.35, performance: 0.30, bestPractices: 0.20, seo: 0.15 }
+const AXE_PENALTY = { critical: 15, serious: 8 }
+const OVERFLOW_PENALTY = 10
+const DEFAULT_REGRESS_TOLERANCE = 2
+
+const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n))
+const round1 = (n) => Math.round(n * 10) / 10
+const num = (v, def = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : def)
+const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0)
+
+// objective sub-score (0–100) for a single page's metrics entry.
+function pageObjective(page) {
+  const lh = page?.lighthouse || {}
+  let score =
+    LH_WEIGHTS.accessibility * num(lh.accessibility) +
+    LH_WEIGHTS.performance * num(lh.performance) +
+    LH_WEIGHTS.bestPractices * num(lh.bestPractices) +
+    LH_WEIGHTS.seo * num(lh.seo)
+  const axe = page?.axe || {}
+  score -= AXE_PENALTY.critical * num(axe.critical)
+  score -= AXE_PENALTY.serious * num(axe.serious)
+  const resp = page?.responsive || {}
+  for (const bp of Object.values(resp)) {
+    if (bp && (bp.overflowX === true || bp.clipped === true)) score -= OVERFLOW_PENALTY
+  }
+  return clamp(score, 0, 100)
+}
+
+// objective (0–100) averaged across all pages in metrics.json.
+function objectiveScore(metrics) {
+  const pages = metrics?.pages || {}
+  const per = Object.values(pages).map(pageObjective)
+  return per.length ? mean(per) : 0
+}
+
+// visual (0–100) = judge.overall * 10, averaged across all pages in judge.json.
+function visualScore(judge) {
+  const pages = judge?.pages || {}
+  const per = Object.values(pages).map((p) => num(p?.overall) * 10)
+  return per.length ? mean(per) : 0
+}
+
+// thresholdsMet: true only if config.thresholds present AND every page clears every bar.
+function computeThresholdsMet(metrics, judge, config) {
+  const t = config?.thresholds
+  if (!t) return false
+  const metricPages = metrics?.pages || {}
+  const judgePages = judge?.pages || {}
+  if (!Object.keys(metricPages).length) return false
+  const ge = (v, bar) => num(v, -Infinity) >= bar
+  for (const page of Object.values(metricPages)) {
+    const lh = page?.lighthouse || {}
+    if (!ge(lh.accessibility, t.accessibility ?? 95)) return false
+    if (!ge(lh.bestPractices, t.bestPractices ?? 95)) return false
+    if (!ge(lh.performance, t.performance ?? 90)) return false
+    if (!ge(lh.seo, t.seo ?? 95)) return false
+    const axe = page?.axe || {}
+    if (num(axe.critical) > 0 || num(axe.serious) > 0) return false
+    const resp = page?.responsive || {}
+    for (const bp of Object.values(resp)) {
+      if (bp && (bp.overflowX === true || bp.clipped === true)) return false
+    }
+  }
+  const visualBar = t.visual ?? 8.0
+  for (const page of Object.values(judgePages)) {
+    if (!ge(page?.overall, visualBar)) return false
+  }
+  return true
+}
+
+// worst (max) axe count of a kind across all pages — for the "no NEW axe" regression check.
+function maxAxe(metrics, kind) {
+  const pages = metrics?.pages || {}
+  let m = 0
+  for (const page of Object.values(pages)) m = Math.max(m, num(page?.axe?.[kind]))
+  return m
+}
+
+// worst (min) LH category across all pages — for the "category dropped" regression check.
+function minLh(metrics, cat) {
+  const pages = metrics?.pages || {}
+  const vals = Object.values(pages).map((p) => num(p?.lighthouse?.[cat]))
+  return vals.length ? Math.min(...vals) : 0
+}
+
+// judge.betterThanPrev across pages: false if ANY page says false (conservative).
+function judgeBetterThanPrev(judge) {
+  const pages = judge?.pages || {}
+  let sawFalse = false
+  let sawTrue = false
+  for (const page of Object.values(pages)) {
+    const b = page?.betterThanPrev
+    if (b === false) sawFalse = true
+    else if (b === true) sawTrue = true
+  }
+  if (sawFalse) return false
+  if (sawTrue) return true
+  return undefined // "equal" or omitted everywhere
+}
+
+// first candidate echoed into round.json (round.json holds a single `candidate`).
+function firstCandidate(judge) {
+  const list = judge?.candidates
+  if (Array.isArray(list) && list.length) {
+    const c = list[0]
+    return { title: c?.title ?? null, lens: c?.lens ?? null }
+  }
+  return null
+}
+
+/**
+ * PURE: build the full round.json object. No file I/O, deterministic, no network.
+ * @param {object} a
+ * @param {object} a.metrics    parsed metrics.json
+ * @param {object} a.judge      parsed judge.json
+ * @param {object} [a.regression] parsed regression.json (optional)
+ * @param {object} [a.prev]     prev accepted round.json (null/undefined => round 0 baseline)
+ * @param {object} [a.config]   parsed config.json (thresholds, regressTolerance)
+ * @param {boolean} [a.buildPass] target build/test/smoke exit-0 (default true; false blocks accept)
+ */
+export function computeRound({ metrics, judge, regression, prev, config, buildPass } = {}) {
+  const objective = objectiveScore(metrics)
+  const visual = visualScore(judge)
+  const roundScore = round1(0.5 * objective + 0.5 * visual)
+
+  const hasPrev = prev != null && typeof prev === 'object'
+  const prevRoundScore = hasPrev ? num(prev.roundScore) : 0
+  const delta = hasPrev ? round1(roundScore - prevRoundScore) : 0
+  const thresholdsMet = computeThresholdsMet(metrics, judge, config)
+  const candidate = firstCandidate(judge)
+  const roundNumber = num(metrics?.round, hasPrev ? num(prev.round) + 1 : 0)
+
+  // ── round 0 (no prev): baseline, no accept/revert ─────────────────────────────
+  if (!hasPrev) {
+    return {
+      round: roundNumber,
+      roundScore,
+      components: { objective: round1(objective), visual: round1(visual) },
+      prevRoundScore: 0,
+      delta: 0,
+      thresholdsMet,
+      accepted: false,
+      decision: 'baseline',
+      rationale: 'Round 0 baseline: first measured UI, nothing to accept or revert against.',
+      candidate,
+    }
+  }
+
+  // ── accept / revert decision vs prev ──────────────────────────────────────────
+  const regressTolerance = num(config?.regressTolerance, DEFAULT_REGRESS_TOLERANCE)
+  const reasons = []
+
+  // 1) delta must be a real improvement.
+  const deltaOk = delta > 0
+  if (!deltaOk) reasons.push(`roundScore did not improve (delta ${delta} <= 0)`)
+
+  // 2) no LH category dropped by more than regressTolerance vs prev.
+  let lhRegressed = false
+  const prevMetrics = prev.metrics // optional: prev round.json may carry its metrics for the check
+  if (prevMetrics) {
+    for (const cat of ['accessibility', 'performance', 'bestPractices', 'seo']) {
+      const drop = minLh(prevMetrics, cat) - minLh(metrics, cat)
+      if (drop > regressTolerance) {
+        lhRegressed = true
+        reasons.push(`Lighthouse ${cat} dropped ${round1(drop)} (> tolerance ${regressTolerance})`)
+      }
+    }
+  }
+
+  // 3) no NEW axe critical/serious vs prev.
+  let newAxe = false
+  if (prevMetrics) {
+    for (const kind of ['critical', 'serious']) {
+      if (maxAxe(metrics, kind) > maxAxe(prevMetrics, kind)) {
+        newAxe = true
+        reasons.push(`new axe ${kind} violation introduced vs prev`)
+      }
+    }
+  }
+
+  // 4) regression diff: a large unintended diff is only allowed when the judge confirms it's better.
+  let regressionBlocks = false
+  if (regression && typeof regression === 'object') {
+    const maxChangedPct = num(regression.maxChangedPct)
+    const better = judgeBetterThanPrev(judge)
+    const highChangeThreshold = num(config?.maxChangedPctThreshold, 40)
+    if (maxChangedPct >= highChangeThreshold && better === false) {
+      regressionBlocks = true
+      reasons.push(
+        `large visual diff (maxChangedPct ${maxChangedPct} >= ${highChangeThreshold}) the judge flagged NOT better than prev`,
+      )
+    }
+  }
+
+  // 5) build/test/smoke must not fail.
+  const buildOk = buildPass !== false
+  if (!buildOk) reasons.push('target build/test/smoke did not exit 0')
+
+  const accepted = deltaOk && !lhRegressed && !newAxe && !regressionBlocks && buildOk
+  const decision = accepted ? 'accept' : 'revert'
+  const rationale = accepted
+    ? `Accepted: roundScore rose by ${delta} with no Lighthouse regression beyond tolerance, no new axe critical/serious, no unintended large visual diff, and build passing.`
+    : `Reverted: ${reasons.join('; ')}.`
+
+  return {
+    round: roundNumber,
+    roundScore,
+    components: { objective: round1(objective), visual: round1(visual) },
+    prevRoundScore: round1(prevRoundScore),
+    delta,
+    thresholdsMet,
+    accepted,
+    decision,
+    rationale,
+    candidate,
+  }
+}
+
+// ── CLI wrapper (runs only when invoked directly) ───────────────────────────────
+function arg(name, def = null) {
+  const i = process.argv.indexOf(`--${name}`)
+  return i !== -1 && process.argv[i + 1] ? process.argv[i + 1] : def
+}
+const fail = (msg) => {
+  console.error(`score: ${msg}`)
+  process.exit(1)
+}
+
+function readJson(path, { required = true } = {}) {
+  if (!existsSync(path)) {
+    if (required) fail(`missing ${path}`)
+    return null
+  }
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'))
+  } catch (e) {
+    fail(`bad JSON in ${path}: ${e.message}`)
+  }
+}
+
+function main() {
+  const roundDir = arg('round') || fail('missing --round')
+  const prevDir = arg('prev')
+  const configPath = arg('config')
+  const buildPassArg = arg('build-pass')
+  const buildPass = buildPassArg == null ? true : buildPassArg !== 'false'
+
+  const metrics = readJson(join(roundDir, 'metrics.json'))
+  const judge = readJson(join(roundDir, 'judge.json'))
+  const regression = readJson(join(roundDir, 'regression.json'), { required: false })
+  const config = configPath ? readJson(configPath) : null
+  const prev = prevDir ? readJson(join(prevDir, 'round.json')) : null
+  // round.json does NOT carry metrics, but the LH-category-drop + new-axe guards need the prev
+  // round's metrics — load them from the prev round dir so those guards actually fire in the CLI.
+  if (prev && prevDir) {
+    const prevMetrics = readJson(join(prevDir, 'metrics.json'), { required: false })
+    if (prevMetrics) prev.metrics = prevMetrics
+  }
+
+  const result = computeRound({ metrics, judge, regression, prev, config, buildPass })
+
+  const outPath = join(roundDir, 'round.json')
+  writeFileSync(outPath, JSON.stringify(result, null, 2))
+  console.error(
+    `score: round ${result.round} -> ${result.roundScore} ` +
+      `(obj ${result.components.objective} / vis ${result.components.visual}) ` +
+      `delta ${result.delta} decision=${result.decision} -> wrote ${outPath}`,
+  )
+}
+
+// Run main only as a CLI (when this file is the entry point), not when imported by the self-test.
+const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
+if (invokedDirectly) main()
