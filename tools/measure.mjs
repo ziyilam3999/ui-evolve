@@ -74,7 +74,11 @@ async function runAxe(targetUrl) {
   const { AxeBuilder } = await import('@axe-core/playwright')
   const browser = await chromium.launch()
   try {
-    const page = await browser.newPage()
+    // @axe-core/playwright requires a page from an EXPLICIT browser.newContext() — a page from the
+    // implicit context of browser.newPage() makes analyze() throw "Please use browser.newContext()"
+    // (it injects axe into every frame and needs the addressable context). Verified live 2026-06-17.
+    const context = await browser.newContext()
+    const page = await context.newPage()
     await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 60000 })
     const results = await new AxeBuilder({ page }).analyze()
     const buckets = { critical: 0, serious: 0, moderate: 0, minor: 0 }

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-06-17
+
+### Fixed
+
+* `tools/measure.mjs`: the axe-core accessibility pass now creates its page from an explicit
+  `browser.newContext()` → `context.newPage()`. The previous `browser.newPage()` made
+  `@axe-core/playwright`'s `analyze()` throw `Please use browser.newContext()`, so the axe path was
+  broken on any real run. The pure-JSON CI self-test (which exercises only `score.mjs`) could not catch
+  it; the first live end-to-end discriminator run did. No public API change.
+
 ## [0.2.0] — 2026-06-17
 
 ### Added
