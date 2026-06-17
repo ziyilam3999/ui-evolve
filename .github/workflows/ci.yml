@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      # Dependency-free: syntax-checks every .mjs and parses every .json.
+      - name: Lint (mjs syntax + json validity)
+        run: npm run lint
+
+  tools-install:
+    # Proves the pinned harness manifest resolves on a clean runner. We skip
+    # postinstall scripts so Playwright does NOT download a browser here — the
+    # browser is only needed by the behavioral self-test, which lands in 0.2.0
+    # and will add its own `npx playwright install --with-deps chromium` step.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Resolve harness dependencies
+        working-directory: tools
+        run: npm install --ignore-scripts --no-audit --no-fund

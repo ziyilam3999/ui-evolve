@@ -1,0 +1,22 @@
+# Node
+node_modules/
+npm-debug.log*
+*.tsbuildinfo
+
+# Harness scratch — per-run evidence the loop writes into a target repo lives in
+# <target>/.ui-evolve/ inside THAT repo; this entry guards stray copies here too.
+.ui-evolve/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+
+# Build / quarantine scratch + macOS
+_quarantine*
+.DS_Store
+
+# Local-only
+*.local
+.env
+.env.*

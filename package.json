@@ -1,0 +1,29 @@
+{
+  "name": "ui-evolve",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "license": "MIT",
+  "description": "A reusable closed-loop skill that improves a web UI to a satisfaction bar with REAL validation — objective metrics (Lighthouse + axe-core + web-vitals + responsive overflow) AND a vision-judge on real rendered screenshots — accepting a change only when both improve with no regression.",
+  "keywords": [
+    "ui",
+    "design",
+    "lighthouse",
+    "accessibility",
+    "axe-core",
+    "playwright",
+    "claude-code",
+    "agent",
+    "design-review"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ziyilam3999/ui-evolve.git"
+  },
+  "scripts": {
+    "lint": "node scripts/lint.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
