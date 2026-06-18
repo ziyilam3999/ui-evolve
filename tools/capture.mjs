@@ -30,15 +30,18 @@ const DEFAULT_BREAKPOINTS = [
   { name: 'desktop', width: 1440, height: 900 },
 ]
 
-function loadBreakpoints() {
-  if (!configPath) return DEFAULT_BREAKPOINTS
+// Parse the config once (breakpoints + optional motion block). Returns {} when no --config.
+function loadConfig() {
+  if (!configPath) return {}
   if (!existsSync(configPath)) fail(`config not found: ${configPath}`)
-  let cfg
   try {
-    cfg = JSON.parse(readFileSync(configPath, 'utf8'))
+    return JSON.parse(readFileSync(configPath, 'utf8'))
   } catch (e) {
     fail(`could not parse config ${configPath}: ${e.message}`)
   }
+}
+
+function loadBreakpoints(cfg) {
   const bps = cfg.breakpoints
   if (!Array.isArray(bps) || bps.length === 0) return DEFAULT_BREAKPOINTS
   for (const bp of bps) {
@@ -56,7 +59,12 @@ function pageSlug(route) {
   return route.replace(/\//g, '_').replace(/^_/, '') || 'home'
 }
 
-const breakpoints = loadBreakpoints()
+const config = loadConfig()
+const breakpoints = loadBreakpoints(config)
+// Optional motion block: { scrollStops:[0,..,1], selector:"[data-parallax]" }. When present, capture
+// viewport stills at several scroll offsets (so a still-frame judge SEES parallax) and verify the
+// prefers-reduced-motion fallback. Absent => behavior unchanged (back-compat with the discriminator).
+const motionCfg = (config.motion && typeof config.motion === 'object') ? config.motion : null
 const shotsDir = join(out, 'shots')
 mkdirSync(shotsDir, { recursive: true })
 
@@ -113,6 +121,28 @@ try {
         context = await browser.newContext({ viewport: { width: bp.width, height: bp.height } })
         const page = await context.newPage()
         await page.goto(target, { waitUntil: 'networkidle', timeout: 60000 })
+        // Trigger scroll-reveal / lazy-loaded content before the full-page shot: many modern sites
+        // start below-fold sections at opacity:0 and reveal them via IntersectionObserver on scroll.
+        // A full-page screenshot at scroll-top would capture them BLANK. Step to the bottom (firing
+        // every observer) then back to top so the full-page capture shows the real, settled page.
+        await page.evaluate(async () => {
+          await new Promise((resolve) => {
+            const step = Math.max(200, Math.floor(window.innerHeight * 0.8))
+            let y = 0
+            const timer = setInterval(() => {
+              window.scrollTo(0, y)
+              y += step
+              if (y >= document.documentElement.scrollHeight) {
+                clearInterval(timer)
+                window.scrollTo(0, document.documentElement.scrollHeight)
+                setTimeout(resolve, 150)
+              }
+            }, 50)
+          })
+        })
+        await page.waitForTimeout(200)
+        await page.evaluate(() => window.scrollTo(0, 0))
+        await page.waitForTimeout(150)
         await page.screenshot({
           path: join(shotsDir, `${slug}-${bp.name}.png`),
           fullPage: true,
@@ -136,6 +166,107 @@ try {
 
     existing.pages[route].responsive = responsive
     if (routeFailed) hadError = true
+  }
+
+  // --- motion pass (parallax / scroll-driven) — only when config.motion present -----------------
+  if (motionCfg) {
+    const stops = Array.isArray(motionCfg.scrollStops) && motionCfg.scrollStops.length
+      ? motionCfg.scrollStops.map(Number).filter((n) => Number.isFinite(n) && n >= 0 && n <= 1)
+      : [0, 0.25, 0.5, 0.75, 1.0]
+    const selector = typeof motionCfg.selector === 'string' && motionCfg.selector ? motionCfg.selector : null
+    const settleMs = Number.isFinite(motionCfg.settleMs) ? motionCfg.settleMs : 250
+    const pct = (f) => String(Math.round(f * 100)).padStart(3, '0')
+
+    // In-page probe: page scrollY + the tracked layer's translateY (px) parsed from its matrix.
+    const probe = (sel) => {
+      const o = { scrollY: window.scrollY, ty: null }
+      if (sel) {
+        const el = document.querySelector(sel)
+        if (el) {
+          const t = window.getComputedStyle(el).transform
+          if (!t || t === 'none') { o.ty = 0 } else {
+            const m = t.match(/matrix(3d)?\(([^)]+)\)/)
+            if (m) {
+              const v = m[2].split(',').map((x) => parseFloat(x))
+              o.ty = m[1] ? (v.length === 16 ? v[13] : null) : (v.length === 6 ? v[5] : null)
+            }
+          }
+        }
+      }
+      return o
+    }
+    const scrollToFrac = (frac) => {
+      const max = document.documentElement.scrollHeight - window.innerHeight
+      window.scrollTo(0, Math.round(frac * Math.max(0, max)))
+    }
+
+    for (const route of pages) {
+      const target = url.replace(/\/$/, '') + route
+      const slug = pageSlug(route)
+      const motionOut = { selector, perBreakpoint: {}, motionActive: null, reducedMotionRespected: null }
+
+      for (const bp of breakpoints) {
+        let context
+        try {
+          // (1) motion ON: scroll-frame stills + layer translate at each stop.
+          context = await browser.newContext({
+            viewport: { width: bp.width, height: bp.height },
+            reducedMotion: 'no-preference',
+          })
+          let page = await context.newPage()
+          await page.goto(target, { waitUntil: 'networkidle', timeout: 60000 })
+          const frames = []
+          for (const f of stops) {
+            await page.evaluate(scrollToFrac, f)
+            await page.waitForTimeout(settleMs)
+            await page.screenshot({ path: join(shotsDir, `${slug}-${bp.name}-s${pct(f)}.png`), fullPage: false })
+            frames.push(await page.evaluate(probe, selector))
+          }
+          await context.close()
+          context = null
+
+          // (2) motion OFF (reduced): the tracked layer must NOT travel between top and mid-scroll.
+          let movesWhenOn = null
+          let reducedTravel = null
+          if (selector) {
+            const tys = frames.map((fr) => fr.ty).filter((v) => typeof v === 'number')
+            movesWhenOn = tys.length >= 2 ? Math.max(...tys) - Math.min(...tys) : null
+            context = await browser.newContext({
+              viewport: { width: bp.width, height: bp.height },
+              reducedMotion: 'reduce',
+            })
+            page = await context.newPage()
+            await page.goto(target, { waitUntil: 'networkidle', timeout: 60000 })
+            const a = await page.evaluate(probe, selector)
+            await page.evaluate(scrollToFrac, 0.5)
+            await page.waitForTimeout(settleMs)
+            const b = await page.evaluate(probe, selector)
+            await context.close()
+            context = null
+            reducedTravel = (typeof a.ty === 'number' && typeof b.ty === 'number') ? Math.abs(b.ty - a.ty) : null
+          }
+
+          motionOut.perBreakpoint[bp.name] = { stops, frames, movesWhenOn, reducedTravel }
+          console.error(`capture: motion ${route} @${bp.name} -> movesWhenOn=${movesWhenOn} reducedTravel=${reducedTravel}`)
+        } catch (e) {
+          hadError = true
+          existing.errors.push({ route, breakpoint: bp.name, phase: 'motion', error: e.message })
+          console.error(`capture: motion ${route} @${bp.name} FAILED: ${e.message}`)
+        } finally {
+          if (context) await context.close()
+        }
+      }
+
+      // Aggregate (selector-based, 2px noise floor): motion is active if any breakpoint's layer
+      // travelled > 2px; reduced-motion is respected only if EVERY breakpoint stayed within 2px.
+      const bpsOut = Object.values(motionOut.perBreakpoint)
+      const moved = bpsOut.map((b) => b.movesWhenOn).filter((v) => typeof v === 'number')
+      const reduced = bpsOut.map((b) => b.reducedTravel).filter((v) => typeof v === 'number')
+      motionOut.motionActive = moved.length ? moved.some((v) => Math.abs(v) > 2) : null
+      motionOut.reducedMotionRespected = reduced.length ? reduced.every((v) => Math.abs(v) <= 2) : null
+      existing.pages[route] = existing.pages[route] || {}
+      existing.pages[route].motion = motionOut
+    }
   }
 } finally {
   if (browser) await browser.close()
