@@ -9,7 +9,8 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { computeRound } from '../tools/score.mjs'
+import { existsSync, readFileSync } from 'node:fs'
+import { computeRound, visualOverall } from '../tools/score.mjs'
 
 // Clear PASS/FAIL summary line. node:test sets process.exitCode=1 if any test failed; 0 means all
 // passed. This prints AFTER the runner finishes, so it reflects the real outcome.
@@ -236,4 +237,151 @@ test('sparse-but-well-formed input does not crash', () => {
   const res = computeRound({ metrics: { pages: { '/': {} } }, judge: { pages: { '/': {} } } })
   assert.equal(typeof res.roundScore, 'number')
   assert.equal(res.decision, 'baseline')
+})
+
+// ── taste-validation bake: banded structural rubric + plateau-rediagnose (2026-06-18) ──────────
+//
+// All structural fixtures share ONE healthy metrics block, so the OBJECTIVE half is constant and the
+// roundScore separation comes PURELY from the visual (structural) half — that's the point of the bake.
+// NOTE: deliberately NO `motion` block on these judge-only fixtures (the v0.3.0 fail-closed motion gate
+// must not trip on structural fixtures — see plan invariant 3 / brief §D).
+const healthyMetrics = {
+  url: 'http://localhost:3000',
+  pages: {
+    '/': {
+      lighthouse: { performance: 92, accessibility: 97, bestPractices: 96, seo: 98 },
+      axe: { critical: 0, serious: 0, moderate: 0, minor: 0, violations: [] },
+      vitals: { lcp: 1.6, cls: 0.02, inp: 80 },
+      responsive: {
+        mobile: { overflowX: false, clipped: false, scrollW: 390, clientW: 390 },
+        tablet: { overflowX: false, clipped: false, scrollW: 768, clientW: 768 },
+        desktop: { overflowX: false, clipped: false, scrollW: 1280, clientW: 1280 },
+      },
+    },
+  },
+  errors: [],
+}
+
+// legibility order = hierarchy/spacing/alignment/consistency/affordance/readability
+// structural order = depth/cohesion/rhythm/hierarchyContrast/distinctiveness
+const judgeOf = (leg, str, verdict) => ({
+  pages: {
+    '/': {
+      perBreakpoint: {},
+      scores: {
+        hierarchy: leg[0], spacing: leg[1], alignment: leg[2], consistency: leg[3], affordance: leg[4], readability: leg[5],
+        depth: str[0], cohesion: str[1], rhythm: str[2], hierarchyContrast: str[3], distinctiveness: str[4],
+      },
+      verdict,
+    },
+  },
+  candidates: [],
+})
+
+// Late-binding (brief §B / PR-3 swap-in): if an env var points at a REAL captured round-6 judge.json,
+// use it instead of the structurally-honest synthetic — no test rewrite when the operator's pick lands.
+const realOrSynthetic = (envVar, synthetic) => {
+  const p = process.env[envVar]
+  if (p && existsSync(p)) {
+    try {
+      return JSON.parse(readFileSync(p, 'utf8'))
+    } catch {
+      /* fall through to synthetic on malformed real fixture */
+    }
+  }
+  return synthetic
+}
+
+// The six fixtures from the plan table (legibility six | structural five).
+const genericOriginal = judgeOf([7, 6, 7, 7, 7, 6], [2, 6, 2, 4, 2], 'clean hero, generic (system font / indigo-on-white)')
+const objectSoup = judgeOf([7, 6, 7, 7, 7, 6], [2, 2, 2, 4, 2], 'object-soup: orbs + shapes + dot grid, piled on')
+const tooSubtle = judgeOf([8, 8, 8, 7, 6, 8], [2, 7, 2, 4, 2], 'too-subtle: single faint aurora on flat white (the band trap)')
+const round6Editorial = realOrSynthetic('UI_EVOLVE_ROUND6_FIXTURE', judgeOf([8, 8, 8, 8, 8, 8], [8, 9, 8, 8, 9], 'warm serif, timeline rhythm, terracotta POV'))
+const round6Terminal = realOrSynthetic('UI_EVOLVE_ROUND6_FIXTURE_TERMINAL', judgeOf([8, 8, 8, 8, 8, 8], [8, 8, 9, 8, 9], 'dark mono, grid depth, signal-lime POV'))
+const round6Swiss = realOrSynthetic('UI_EVOLVE_ROUND6_FIXTURE_SWISS', judgeOf([8, 8, 8, 8, 8, 8], [9, 8, 9, 9, 8], 'numbered grid, hairline rhythm, Archivo POV'))
+
+const tasteConfig = {
+  thresholds: { accessibility: 95, bestPractices: 95, performance: 90, seo: 95, visual: 8.0 },
+  regressTolerance: 2,
+  structuralWeight: 0.5, // 0.5 / 0.5 default; structuralFloor cap intentionally OFF (soft weighting first)
+}
+
+// score a judge-only fixture against the shared healthy metrics (baseline path; diagnosis still emitted).
+const scoreFixture = (judge) => computeRound({ metrics: healthyMetrics, judge, config: tasteConfig })
+
+test('AC3/AC4/AC5 — banded structural rubric: just-right > BOTH extremes; object-soup < generic', () => {
+  const generic = scoreFixture(genericOriginal).roundScore
+  const soup = scoreFixture(objectSoup).roundScore
+  const subtle = scoreFixture(tooSubtle).roundScore
+  const rounds6 = { editorial: scoreFixture(round6Editorial).roundScore, terminal: scoreFixture(round6Terminal).roundScore, swiss: scoreFixture(round6Swiss).roundScore }
+
+  for (const [name, rs] of Object.entries(rounds6)) {
+    // AC3: each round-6 redesign clears the generic original by a strict margin (> 5 pts).
+    assert.ok(rs - generic > 5, `AC3: round6${name} (${rs}) - generic (${generic}) must be > 5`)
+    // AC4: each round-6 beats BOTH band extremes (the 3-way band: just-right > too-subtle AND > object-soup).
+    assert.ok(rs > subtle, `AC4: round6${name} (${rs}) must beat tooSubtle (${subtle})`)
+    assert.ok(rs > soup, `AC4: round6${name} (${rs}) must beat objectSoup (${soup})`)
+  }
+  // AC5: object-soup now scores BELOW the clean original (cohesion/noise dims bite) — un-ties the old 6.7/6.7.
+  assert.ok(soup < generic, `AC5: objectSoup (${soup}) must be below genericOriginal (${generic})`)
+})
+
+test('AC6 — plateau re-diagnose: tooSubtle bottleneck is structural; weakest dims are structural', () => {
+  const diag = scoreFixture(tooSubtle).diagnosis
+  assert.equal(diag.bottleneckBlock, 'structural', `bottleneckBlock should be structural, got ${diag.bottleneckBlock}`)
+  assert.ok(diag.structuralBlock < diag.legibilityBlock, `structuralBlock (${diag.structuralBlock}) must be below legibilityBlock (${diag.legibilityBlock})`)
+  assert.ok(diag.weakestDims.length >= 2, 'at least two weakest dims reported')
+  for (const w of diag.weakestDims) {
+    assert.equal(w.block, 'structural', `weakest dim ${w.dim} should be tagged structural, got ${w.block}`)
+  }
+})
+
+test('AC6b — diagnosis is emitted on EVERY round (baseline + accept/revert paths)', () => {
+  const baseline = scoreFixture(round6Editorial)
+  assert.equal(baseline.decision, 'baseline')
+  assert.ok(baseline.diagnosis && baseline.diagnosis.bottleneckBlock, 'baseline round.json carries a diagnosis')
+  const prev = { ...scoreFixture(genericOriginal), metrics: healthyMetrics }
+  const next = computeRound({ metrics: healthyMetrics, judge: round6Editorial, prev, config: tasteConfig })
+  assert.ok(next.diagnosis && next.diagnosis.bottleneckBlock, 'non-baseline round.json carries a diagnosis')
+})
+
+test('AC7 — structural-only pair separates by > 5 (the both-ends proof the structural five are consumed)', () => {
+  // Two fixtures IDENTICAL on the legibility six, differing ONLY on the structural five. Each carries the
+  // SAME `overall` (8.0), so the OLD legibility-only scorer (which reads `overall`) would TIE them (diff 0,
+  // fails > 5 RED). The NEW scorer recomputes from the structural block -> they separate (> 5 GREEN).
+  const structLow = { pages: { '/': { scores: { hierarchy: 8, spacing: 8, alignment: 8, consistency: 8, affordance: 8, readability: 8, depth: 2, cohesion: 2, rhythm: 2, hierarchyContrast: 2, distinctiveness: 2 }, overall: 8.0 } } }
+  const structHigh = { pages: { '/': { scores: { hierarchy: 8, spacing: 8, alignment: 8, consistency: 8, affordance: 8, readability: 8, depth: 9, cohesion: 9, rhythm: 9, hierarchyContrast: 9, distinctiveness: 9 }, overall: 8.0 } } }
+  const low = computeRound({ metrics: healthyMetrics, judge: structLow, config: tasteConfig }).roundScore
+  const high = computeRound({ metrics: healthyMetrics, judge: structHigh, config: tasteConfig }).roundScore
+  assert.ok(high - low > 5, `AC7: structHigh (${high}) - structLow (${low}) must be > 5 — proves the structural five move the score`)
+})
+
+test('tasteVsPrev = worse blocks accept even when the objective/roundScore improved', () => {
+  // prev = a mediocre accepted round; candidate has a HIGHER roundScore but the judge flags taste worse.
+  const prev = { ...scoreFixture(genericOriginal), metrics: healthyMetrics }
+  const tasteRegressedJudge = judgeOf([8, 8, 8, 8, 8, 8], [8, 8, 8, 8, 9], 'higher score but uglier')
+  tasteRegressedJudge.pages['/'].tasteVsPrev = 'worse'
+  const res = computeRound({ metrics: healthyMetrics, judge: tasteRegressedJudge, prev, config: tasteConfig })
+  assert.ok(res.delta > 0, `sanity: roundScore should have improved (delta ${res.delta})`)
+  assert.equal(res.decision, 'revert', `a taste regression must revert, got ${res.decision}: ${res.rationale}`)
+})
+
+test('visualOverall band: neither object-soup nor too-subtle out-scores a structurally-real page', () => {
+  // unit-level proof the BLOCK peaks in the middle (independent of objective half).
+  const soupScores = objectSoup.pages['/'].scores
+  const subtleScores = tooSubtle.pages['/'].scores
+  const realScores = round6Swiss.pages['/'].scores
+  const cfg = { structuralWeight: 0.5 }
+  assert.ok(visualOverall(realScores, cfg) > visualOverall(soupScores, cfg), 'round-6 > object-soup')
+  assert.ok(visualOverall(realScores, cfg) > visualOverall(subtleScores, cfg), 'round-6 > too-subtle')
+})
+
+test('structuralFloor cap (opt-in) pulls a legible-but-empty page down; OFF by default', () => {
+  // High legibility (10) but a low structural block (3 < floor 6): soft weighting yields 6.5, which the
+  // opt-in floor pulls back down to 6.0 — the cleanest encoding of "legible-but-empty is not good".
+  const emptyButLegible = { hierarchy: 10, spacing: 10, alignment: 10, consistency: 10, affordance: 10, readability: 10, depth: 3, cohesion: 3, rhythm: 3, hierarchyContrast: 3, distinctiveness: 3 }
+  const soft = visualOverall(emptyButLegible, { structuralWeight: 0.5 }) // floor OFF
+  const capped = visualOverall(emptyButLegible, { structuralWeight: 0.5, structuralFloor: 6.0 })
+  assert.ok(capped <= 6.0, `floor must cap at 6.0, got ${capped}`)
+  assert.ok(soft > capped, `cap must lower the score (soft ${soft} vs capped ${capped})`)
 })
