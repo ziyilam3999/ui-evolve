@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-06-18
+
+### Added
+
+* **Explore mode — the loop can now LEAP, not only hill-climb** (`tools/score.mjs`,
+  `references/round-workflow.mjs`, `references/contract.md`, `SKILL.md`). Today's loop is
+  refine-only: one candidate, sharpened by 3 lenses. That can polish a structurally-weak base
+  forever. Explore mode is a new opt-in gear: it asks N agents to each generate a DISTINCT,
+  boldly-committed full redesign direction (editorial / terminal / swiss …), then holds a
+  tournament — ranking all N on the **structural block** — and the winner becomes the new
+  baseline before the loop switches back to refine. New PURE export `rankDirections(judges,
+  config)` (tournament ranking on the structural block; returns `winnerIndex`) + a
+  `mode==='explore'`-gated `generate-directions` fan-out with a new `DIRECTION_SCHEMA`.
+* **`references/direction-brief.md` — a reusable bold-POV mandate** handed to every generator
+  (explore directions AND the refine synthesize step): FORBIDS generic defaults (system/Inter
+  font, indigo-on-white, generic card-on-white) and DEMANDS a committed direction (named font
+  pairing, a real palette = accent + grey ramp + semantic, a depth concept, a section-rhythm
+  plan, ONE cohesive content-motion technique). The frontend-design "intentionality, not
+  intensity" catalyst, baked into the harness as a durable asset instead of a one-time prompt.
+* **Auto-suggest the leap on a structural plateau** (`SKILL.md`): when round-0's
+  `diagnosis.structuralBlock < structuralFloor`, the loop recommends explore mode — it detects
+  "the base is the problem, stop tuning the backdrop" and proposes leaping instead of grinding
+  refine rounds. Closes the diagnose→explore loop.
+
+### Config
+
+* New keys (`resolveExploreConfig`, defaults applied centrally): `mode` (`'refine'`\|`'explore'`,
+  default `'refine'`), `exploreDirections` (default `3`), `directionBrief` (default
+  `references/direction-brief.md`). Back-compat: `mode` defaults to `'refine'`, so a config with
+  no explore keys behaves exactly as before — explore is fully opt-in.
+
 ## [0.4.0] — 2026-06-18
 
 ### Added
