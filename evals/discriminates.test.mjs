@@ -10,7 +10,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
-import { computeRound, visualOverall, rankDirections, resolveExploreConfig } from '../tools/score.mjs'
+import { computeRound, visualOverall, rankDirections, resolveExploreConfig, resolveTasteConfig } from '../tools/score.mjs'
 
 // Clear PASS/FAIL summary line. node:test sets process.exitCode=1 if any test failed; 0 means all
 // passed. This prints AFTER the runner finishes, so it reflects the real outcome.
@@ -451,5 +451,48 @@ test('workflow-validity — round-workflow.mjs is valid inside the runtime async
   assert.doesNotThrow(
     () => new AsyncFunction(body),
     'round-workflow.mjs must be syntactically valid as the body of the runtime async-fn wrapper',
+  )
+})
+
+// ── taste band-calibration (Phase 4): resolveTasteConfig defaults + live-harness wrapped-validity ──
+
+test('resolveTasteConfig — defaults to the conventional pole dirs + brief; explicit overrides respected', () => {
+  const defaults = {
+    tooBusy: 'references/taste-exemplars/too-busy',
+    tooSubtle: 'references/taste-exemplars/too-subtle',
+    genericBad: 'references/taste-exemplars/generic-bad',
+    distinctiveGood: 'references/taste-exemplars/distinctive-good',
+  }
+  // absent / {} / non-object / absent tasteExemplars all resolve to the default paths (back-compat).
+  for (const input of [{}, undefined, null, { mode: 'explore' }, { tasteExemplars: null }]) {
+    const r = resolveTasteConfig(input)
+    assert.deepEqual(r.tasteExemplars, defaults, `tasteExemplars should default for ${JSON.stringify(input)}`)
+    assert.equal(r.tasteBrief, 'references/taste-brief.md', 'tasteBrief defaults to the brief path')
+  }
+  // explicit overrides respected (full + partial — a partial override keeps defaults for the rest).
+  const full = resolveTasteConfig({
+    tasteExemplars: { tooBusy: 'a/busy', tooSubtle: 'a/subtle', genericBad: 'a/generic', distinctiveGood: 'a/good' },
+    tasteBrief: 'a/brief.md',
+  })
+  assert.deepEqual(full.tasteExemplars, { tooBusy: 'a/busy', tooSubtle: 'a/subtle', genericBad: 'a/generic', distinctiveGood: 'a/good' })
+  assert.equal(full.tasteBrief, 'a/brief.md')
+  const partial = resolveTasteConfig({ tasteExemplars: { distinctiveGood: 'custom/good' } })
+  assert.equal(partial.tasteExemplars.distinctiveGood, 'custom/good', 'override respected')
+  assert.equal(partial.tasteExemplars.tooBusy, defaults.tooBusy, 'unset pole keeps its default')
+  assert.equal(partial.tasteBrief, 'references/taste-brief.md', 'unset tasteBrief keeps its default')
+})
+
+test('workflow-validity — taste-discriminates-live.mjs is valid inside the runtime async-fn wrapper', () => {
+  // Mirrors the round-workflow.mjs proof above: the live harness legally uses top-level `await`/`return`
+  // + injected agent globals, so a BARE `node --check` FAILS by design (scripts/lint.mjs defers it, same
+  // as the workflow scripts). The achievable static guarantee is the WRAPPED check — strip the module
+  // `export` keyword and construct the body as an async-function body, which parses (but does not execute)
+  // it, throwing a SyntaxError if the harness body is malformed.
+  const src = readFileSync(new URL('./taste-discriminates-live.mjs', import.meta.url), 'utf8')
+  const body = src.replace(/^[ \t]*export[ \t]+/gm, '') // strip `export ` so the body is wrappable
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+  assert.doesNotThrow(
+    () => new AsyncFunction(body),
+    'taste-discriminates-live.mjs must be syntactically valid as the body of the runtime async-fn wrapper',
   )
 })

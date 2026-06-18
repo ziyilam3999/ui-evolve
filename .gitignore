@@ -20,6 +20,15 @@ npm-debug.log*
 _quarantine*
 .DS_Store
 
+# Taste-exemplar pole screenshots are the user's OWN local renders (a four-pole
+# picture book the judge reads). They are kept LOCAL and NEVER committed — a résumé
+# full-page shot can render employer/PII content, and a text grep is blind to pixels.
+# Ignore the pole subdirs + every PNG under the tree, but KEEP the committed README
+# (the slot doc) trackable so the dir is documented in the repo.
+references/taste-exemplars/**/*.png
+references/taste-exemplars/*/
+!references/taste-exemplars/README.md
+
 # Local-only
 *.local
 .env

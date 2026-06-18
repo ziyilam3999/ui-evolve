@@ -210,7 +210,17 @@ operator's preference). HOLD at sign-off — do not declare the UI "done" withou
 - `SKILL.md` — this procedure.
 - `references/rubric.md` — the fixed vision-judge rubric (scoring SSOT).
 - `references/contract.md` — the JSON shapes + CLI contracts every tool/agent reads & writes.
-- `references/judge-prompt.md` — the vision-judge subagent prompt.
+- `references/judge-prompt.md` — the vision-judge subagent prompt. Carries the taste picture-book
+  pre-step: it reads the four-pole exemplars + the abstract brief, names WHICH POLE the candidate is
+  closest to, and scores the structural block by "which pole" (NOT distance to the one good image);
+  with no exemplars present it scores without anchors (back-compat).
+- `references/taste-brief.md` — the abstract four-pole structural rubric (too-busy / too-subtle /
+  generic-bad / distinctive-good), described by structural properties. Reusable; filled into the
+  judge-prompt's `{{TASTE_BRIEF}}` slot. Carries NO résumé content.
+- `references/taste-exemplars/` — the four-pole picture book. USER-SUPPLIED + LOCAL: the pole dirs
+  (`too-busy/`, `too-subtle/`, `generic-bad/`, `distinctive-good/`) and their PNGs are **gitignored**
+  (a full-page shot can render PII; a text gate is blind to pixels) — only the README ships. Resolved
+  by `resolveTasteConfig` in `tools/score.mjs`; empty/absent ⇒ judge scores without anchors.
 - `references/direction-brief.md` — the bold-POV mandate (forbid generic defaults; demand a committed
   direction). Handed to the explore-mode direction generators AND the refine synthesize step.
 - `references/round-workflow.mjs` — the per-round research+validation Workflow the skill spawns
@@ -222,3 +232,8 @@ operator's preference). HOLD at sign-off — do not declare the UI "done" withou
 - `tools/score.mjs` — combine metrics + judge into `roundScore` + accept/revert decision.
 - `tools/package.json` — pinned harness devDeps (lighthouse, @axe-core/playwright, playwright, pixelmatch, pngjs).
 - `evals/discriminates.test.mjs` — the CI self-test: scorer orders a worse UI below a better one.
+- `evals/taste-discriminates-live.mjs` — the Layer-2 LIVE honesty harness (agent-spawning, NOT CI).
+  The orchestrator runs it live: it spawns the updated 11-dim judge on the real round-1/3/4 + 3 round-6
+  shots and asserts the judge's OWN structural block puts round-6 above the three bad poles (+ a real
+  `tasteVsPrev:'worse'` round-3-vs-round-1). It legally uses top-level await + injected globals, so a
+  bare `node --check` fails by design (lint defers it; the wrapped-validity proof is in the self-test).

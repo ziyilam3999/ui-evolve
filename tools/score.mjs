@@ -224,6 +224,29 @@ export function resolveExploreConfig(config) {
   return { mode, exploreDirections, directionBrief }
 }
 
+/**
+ * PURE: single source of truth for the taste-exemplar + brief path defaults (band-calibration,
+ * 2026-06-18). Additive only — NO scoring math, NO change to any existing export. An absent/`{}`
+ * config (or absent `tasteExemplars`) resolves to the conventional default pole dirs + brief path;
+ * the four pole dirs are user-supplied + gitignored, so when they hold no images the judge scores
+ * WITHOUT picture anchors (back-compat — see references/judge-prompt.md / references/contract.md).
+ * @param {object} [config]  parsed config.json.
+ * @returns {{ tasteExemplars: { tooBusy:string, tooSubtle:string, genericBad:string, distinctiveGood:string }, tasteBrief:string }}
+ */
+export function resolveTasteConfig(config) {
+  const c = config && typeof config === 'object' ? config : {}
+  const ex = c.tasteExemplars && typeof c.tasteExemplars === 'object' ? c.tasteExemplars : {}
+  const str = (v, def) => (typeof v === 'string' && v ? v : def)
+  const tasteExemplars = {
+    tooBusy: str(ex.tooBusy, 'references/taste-exemplars/too-busy'),
+    tooSubtle: str(ex.tooSubtle, 'references/taste-exemplars/too-subtle'),
+    genericBad: str(ex.genericBad, 'references/taste-exemplars/generic-bad'),
+    distinctiveGood: str(ex.distinctiveGood, 'references/taste-exemplars/distinctive-good'),
+  }
+  const tasteBrief = str(c.tasteBrief, 'references/taste-brief.md')
+  return { tasteExemplars, tasteBrief }
+}
+
 // thresholdsMet: true only if config.thresholds present AND every page clears every bar.
 function computeThresholdsMet(metrics, judge, config) {
   const t = config?.thresholds

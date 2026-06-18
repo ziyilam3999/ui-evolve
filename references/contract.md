@@ -170,6 +170,30 @@ single source of truth). The per-target `config.json` adds:
   the direction generators AND the refine synthesize step. The orchestrator reads this file and passes
   its TEXT to `round-workflow.mjs` via `args.directionBriefText` (the Workflow script never reads files).
 
+### config schema (taste-exemplar keys — band calibration, opt-in / back-compat)
+
+The four-pole picture book is OPTIONAL: an absent/`{}` config (or absent `tasteExemplars`) resolves
+to the conventional default pole dirs, and when those dirs hold no images the judge scores WITHOUT
+picture anchors — byte-identical to the pre-picture-book behavior. The defaults are applied by
+`resolveTasteConfig(config)` in `tools/score.mjs` (the single source of truth). The per-target
+`config.json` adds:
+- `tasteExemplars` (object, optional) — the four labeled pole dirs the judge reads as anchors:
+  - `tooBusy` (path, default **`references/taste-exemplars/too-busy`**) — clutter / object-soup pole.
+  - `tooSubtle` (path, default **`references/taste-exemplars/too-subtle`**) — flat-but-legible pole.
+  - `genericBad` (path, default **`references/taste-exemplars/generic-bad`**) — clean-but-default pole.
+  - `distinctiveGood` (path, default **`references/taste-exemplars/distinctive-good`**) — the good corner.
+  The pole dirs are **user-supplied and gitignored** (a full-page shot can render PII; a text gate is
+  blind to pixels), so the public harness ships only the wiring + the abstract `tasteBrief`. Each pole
+  may hold 0+ PNGs; an empty/absent pole simply drops that anchor (back-compat).
+- `tasteBrief` (path, default **`references/taste-brief.md`**) — the abstract four-pole structural
+  rubric handed to the judge. The orchestrator reads this file + the resolved exemplar paths and fills
+  the `{{TASTE_BRIEF}}` / `{{TASTE_EXEMPLAR_PATHS}}` slots in `references/judge-prompt.md`.
+
+**Back-compat:** when no exemplar images are present, `references/judge-prompt.md` instructs the judge
+to score WITHOUT anchors (no error, no penalty). The judge names **which pole** a candidate is closest
+to and scores "which pole," explicitly NOT "distance to the one good image" (distinctiveness rewards
+committed NOVELTY, never exemplar-cloning).
+
 ## DIRECTION_SCHEMA (explore mode — `references/round-workflow.mjs`)
 
 Each explore-mode agent returns ONE committed full-redesign direction (a complete recipe, not a tweak):
