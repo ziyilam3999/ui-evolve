@@ -1,0 +1,1 @@
+{ "design": "round6-swiss", "scores": { "hierarchy": 9, "spacing": 8, "alignment": 9, "consistency": 8, "affordance": 6, "readability": 8, "depth": 4, "cohesion": 9, "rhythm": 7, "hierarchyContrast": 8, "distinctiveness": 9 }, "legibilityBlock": 8.0, "structuralBlock": 7.4, "overall": 7.7, "closestPole": "distinctive-good" }

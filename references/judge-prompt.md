@@ -19,6 +19,22 @@ what is visible in the provided screenshots — never assume, never reward inten
 
 Every score needs a concrete, screenshot-grounded justification (what you see, where). No vibes.
 
+**Picture-book pre-step (taste exemplars) — anchor the structural block, then score "which pole":**
+{{TASTE_EXEMPLAR_PATHS}}   # labeled four-pole exemplar dirs: too-busy / too-subtle / generic-bad / distinctive-good (each may hold 0+ PNGs)
+{{TASTE_BRIEF}}            # the abstract four-pole structural rubric (references/taste-brief.md)
+
+- **IF exemplar paths resolve to real images:** Read the labeled pole shots and the taste brief
+  FIRST. Then, for the candidate, state **which pole it is closest to and why** (grounded in the
+  decorative/structural inventory below). Score the structural block by **which pole** the
+  candidate lands in — NOT by visual "distance to the one good image." A candidate that commits
+  to its OWN novel direction (different fonts/palette/depth concept from the `distinctive-good/`
+  exemplars) is still `distinctive-good`: **distinctiveness rewards committed NOVELTY, never
+  cloning the exemplar.** The good corner is a STRUCTURAL standard (one committed depth concept +
+  rhythm + cohesion + POV), not a template to copy.
+- **IF no exemplars are present** (a pole dir is empty/absent, or none configured): score the
+  structural block WITHOUT picture anchors — exactly as the rubric alone defines (back-compat, no
+  error, no penalty). The exemplars only sharpen the anchor; their absence never changes the dims.
+
 **BEFORE scoring, inventory two layers separately from the content (this is what makes dims 7–11
 honest — score the structural dims from THIS inventory, not from "the text survived"):**
 - **(a) Decorative layer** — list every non-content element you see (gradients, orbs, grids, shapes,

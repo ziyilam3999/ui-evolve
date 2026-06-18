@@ -12,13 +12,14 @@ import { execFileSync } from 'node:child_process'
 const ROOT = new URL('..', import.meta.url).pathname
 const SKIP = new Set(['node_modules', '.git', '.ui-evolve', '_quarantine'])
 
-// Workflow scripts (`*-workflow.mjs`) are executed inside the Claude Code Workflow
-// runtime, which wraps the body in an async function — so they legally use top-level
-// `await`/`return` and the injected globals (agent/parallel/phase/args). `node --check`
-// treats a file as a standalone ESM module and would falsely reject that, so we exclude
-// them from the syntax pass. Their real validation is the end-to-end run. (Logged below,
-// not silently skipped.)
-const isWorkflowScript = (f) => /-workflow\.mjs$/.test(basename(f))
+// Runtime-wrapped agent scripts (`*-workflow.mjs` Workflow scripts AND the `*-live.mjs` live
+// agent-spawning harnesses, e.g. evals/taste-discriminates-live.mjs) are executed inside the
+// Claude Code agent runtime, which wraps the body in an async function — so they legally use
+// top-level `await`/`return` and the injected globals (agent/parallel/phase/args). `node --check`
+// treats a file as a standalone ESM module and would falsely reject that, so we exclude them from
+// the syntax pass. Their real validation is the end-to-end run + the WRAPPED-validity proof in
+// evals/discriminates.test.mjs (AsyncFunction-construct the body). (Logged below, not silently skipped.)
+const isWorkflowScript = (f) => /-workflow\.mjs$|-live\.mjs$/.test(basename(f))
 
 function walk(dir, acc = []) {
   for (const name of readdirSync(dir)) {
