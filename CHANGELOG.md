@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-06-18
+
+### Added
+
+* **Band-calibration exemplars — the judge gets a "picture book" of the four poles**
+  (`references/judge-prompt.md`, `references/taste-brief.md`, `references/taste-exemplars/`,
+  `tools/score.mjs`, `references/contract.md`, `SKILL.md`). New judge-prompt slots
+  `{{TASTE_EXEMPLAR_PATHS}}` + `{{TASTE_BRIEF}}` let the vision-judge anchor a candidate against
+  four labeled band poles (too-busy / too-subtle / generic-bad / distinctive-good): it names
+  **which pole the candidate is closest to and why**, scoring "which pole" — NOT "clone the good
+  image" (distinctiveness still rewards novel commitment). A new pure `resolveTasteConfig` centralizes
+  the exemplar/brief path defaults. Exemplars are **user-supplied and local** (the pole dirs are
+  gitignored); when absent the judge degrades gracefully and scores without anchors (back-compat).
+* **Layer-2 live judge re-run — the Rule-18 honesty proof** (`evals/taste-discriminates-live.mjs`,
+  `evals/LAYER2-FINDING.md`, `evals/fixtures/*.judge.json`). The Phase-1 CI gate proves the scoring
+  *math*; this proves the *judge*. The updated 11-dim judge was run BLIND on real rendered screenshots
+  of the original/rich/subtle baselines plus three committed redesigns: **6/6 correct** blind pole
+  classification; real structural blocks separate the failure poles (3.4–4.4) from the redesigns
+  (7.4–7.8); the old band-inversion (a flat too-subtle page outscoring a clean one) is fixed on real
+  pixels. The finding honestly surfaces that the synthetic Layer-1 fixtures ran ~30% hot (notably a
+  flat-but-tasteful design correctly scoring low on depth) rather than papering over it.
+
+### Notes
+
+* CI keeps the deterministic synthetic fixtures by default; the committed real judge fixtures can be
+  late-bound via `UI_EVOLVE_ROUND6_FIXTURE*` env vars. No résumé pixels are committed — the exemplar
+  images are kept local/gitignored by design; only numeric scores ship.
+
 ## [0.5.0] — 2026-06-18
 
 ### Added
