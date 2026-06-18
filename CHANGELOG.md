@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-06-18
+
+### Added
+
+* **Banded structural rubric — the loop can now see *structure & taste*, not just legibility**
+  (`references/rubric.md`, `tools/score.mjs`, `references/judge-prompt.md`, `references/contract.md`).
+  Five new visual-judge dimensions (depth / cohesion / section-rhythm / hierarchy-contrast /
+  distinctiveness) join the six legibility dims. The overall is now a **weighted block**
+  `visualOverall = structuralWeight·structuralBlock + (1−structuralWeight)·legibilityBlock`
+  (`structuralWeight` default 0.5). The dims are *opposing* on purpose — a noise/cohesion dim paired
+  against depth/variety/distinctiveness — so the score **peaks in the sweet spot**: neither an empty
+  (too-subtle) page nor a cluttered (object-soup) page can max the block, only a cohesive, varied,
+  committed design. This fixes the live band-inversion bug where the old legibility-only scorer rated
+  a flat too-subtle page (87.1) *above* a clean one (83.1) and scored object-soup identically to clean.
+* **Two-sided decorative + structure inventory** (`references/judge-prompt.md`): before scoring, the
+  judge inventories the decorative layer (catch clutter) AND the structural layer (catch emptiness),
+  stating absences explicitly — so the structural dims produce honest numbers.
+* **Plateau → re-diagnose** (`tools/score.mjs`, `SKILL.md`): every round emits a `diagnosis`
+  (`weakestDims`, `bottleneckBlock`, `structuralBlock`, `legibilityBlock`). The convergence protocol no
+  longer declares "done" on a structural plateau below `structuralFloor` (default 6.0) — it names the
+  weak structural dim and requires the next round to target the base structure, not the backdrop.
+* **Taste-regression revert** (`tools/score.mjs`): `tasteVsPrev` blocks accept when any page reports a
+  taste regression, even if objective metrics improved.
+* **Discrimination self-test** (`evals/discriminates.test.mjs`): six fixtures (3 bad poles
+  generic/object-soup/too-subtle + 3 good poles editorial/terminal/swiss) assert the band — each good
+  design beats both extremes by >5, object-soup falls below the clean original, and the too-subtle
+  diagnosis flags the structural bottleneck. Both-ends proven (RED on the legibility-only scorer, GREEN
+  with the structural block). Late-binds to real round-6 judge data via `UI_EVOLVE_ROUND6_FIXTURE`.
+
+### Config
+
+* New keys: `structuralWeight` (default 0.5) and `structuralFloor` (default 6.0, soft-cap OFF unless set).
+  Back-compat: a judge.json with no structural dims still scores via the legibility path; pages with no
+  motion block are unaffected (v0.3.0 motion gate intact).
+
 ## [0.3.0] — 2026-06-18
 
 ### Added
