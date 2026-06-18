@@ -17,6 +17,10 @@ import { pathToFileURL } from 'node:url'
 const LH_WEIGHTS = { accessibility: 0.35, performance: 0.30, bestPractices: 0.20, seo: 0.15 }
 const AXE_PENALTY = { critical: 15, serious: 8 }
 const OVERFLOW_PENALTY = 10
+// A motion effect (parallax/scroll-driven) that does NOT go static under prefers-reduced-motion is an
+// accessibility defect (vestibular-disorder trigger). Penalize only when capture observed motion AND
+// proved the reduced-motion fallback failed; pages with no motion block are unaffected (back-compat).
+const MOTION_REDUCED_PENALTY = 12
 const DEFAULT_REGRESS_TOLERANCE = 2
 
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n))
@@ -39,6 +43,8 @@ function pageObjective(page) {
   for (const bp of Object.values(resp)) {
     if (bp && (bp.overflowX === true || bp.clipped === true)) score -= OVERFLOW_PENALTY
   }
+  const motion = page?.motion || null
+  if (motion && motion.reducedMotionRespected === false) score -= MOTION_REDUCED_PENALTY
   return clamp(score, 0, 100)
 }
 
@@ -76,6 +82,8 @@ function computeThresholdsMet(metrics, judge, config) {
     for (const bp of Object.values(resp)) {
       if (bp && (bp.overflowX === true || bp.clipped === true)) return false
     }
+    const motion = page?.motion || null
+    if (motion && motion.reducedMotionRespected === false) return false
   }
   const visualBar = t.visual ?? 8.0
   for (const page of Object.values(judgePages)) {
@@ -271,6 +279,24 @@ function main() {
   if (prev && prevDir) {
     const prevMetrics = readJson(join(prevDir, 'metrics.json'), { required: false })
     if (prevMetrics) prev.metrics = prevMetrics
+  }
+
+  // Fail-closed (2026-06-18): if the config declares a `motion` block (the author expects
+  // parallax/scroll motion) but the captured metrics carry NO motion data for a page, the capture
+  // was almost certainly run with a motion-BLIND tool (e.g. a pre-motion capture.mjs from a stale
+  // clone while the motion upgrade still lives in an unshipped worktree). Scoring it would silently
+  // drop the reduced-motion a11y penalty and lose the motion evidence. Refuse rather than mis-score.
+  if (config?.motion && metrics?.pages) {
+    const blind = Object.entries(metrics.pages)
+      .filter(([, p]) => !p?.motion || Object.keys(p.motion).length === 0)
+      .map(([route]) => route)
+    if (blind.length) {
+      fail(
+        `config declares a motion block but metrics has no motion data for page(s): ${blind.join(', ')}. ` +
+          `The capture was likely run with a motion-blind tool — re-run capture.mjs from the motion-aware ` +
+          `harness (the build that writes a "motion" key per page) before scoring.`,
+      )
+    }
   }
 
   const result = computeRound({ metrics, judge, regression, prev, config, buildPass })

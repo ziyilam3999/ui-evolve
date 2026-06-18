@@ -205,6 +205,33 @@ test('a failing build blocks accept even on a real improvement', () => {
   assert.equal(res.decision, 'revert', `failing build must revert, got ${res.decision}`)
 })
 
+test('motion that ignores prefers-reduced-motion is penalized; respecting it is not', () => {
+  // Same page, identical except the motion block. A parallax that keeps moving under
+  // reduced-motion is an a11y defect => lower objective than one that goes static.
+  const withMotion = (respected) => ({
+    url: 'http://localhost:3000',
+    pages: {
+      '/': {
+        ...betterMetrics.pages['/'],
+        motion: { selector: '[data-parallax]', motionActive: true, reducedMotionRespected: respected },
+      },
+    },
+    errors: [],
+  })
+  const respected = computeRound({ metrics: withMotion(true), judge: betterJudge })
+  const ignored = computeRound({ metrics: withMotion(false), judge: betterJudge })
+  assert.ok(
+    respected.components.objective > ignored.components.objective,
+    `reduced-motion-respected (${respected.components.objective}) must beat ignored (${ignored.components.objective})`,
+  )
+  // And a page with NO motion block scores exactly like the reduced-motion-respected one (back-compat).
+  const none = computeRound({ metrics: betterMetrics, judge: betterJudge })
+  assert.equal(
+    none.components.objective, respected.components.objective,
+    'a page with no motion block must be unaffected by the motion penalty',
+  )
+})
+
 test('sparse-but-well-formed input does not crash', () => {
   const res = computeRound({ metrics: { pages: { '/': {} } }, judge: { pages: { '/': {} } } })
   assert.equal(typeof res.roundScore, 'number')
