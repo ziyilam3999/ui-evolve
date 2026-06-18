@@ -95,6 +95,33 @@ is ultimately the operator's call; the loop's job is to reach a defensible plate
 
 ---
 
+## Explore mode — leap to a better base, then refine (two-phase)
+
+The refine loop above HILL-CLIMBS one design: it sharpens a single candidate a tweak at a time. If the
+base STRUCTURE is the problem, no amount of tweaking the backdrop fixes it — you polish a bad base
+forever. **Explore mode** is the LEAP gear. It is opt-in (`mode: 'explore'`) and runs in two phases:
+
+1. **Explore — N committed directions.** `round-workflow.mjs`'s `generate-directions` phase (gated on
+   `mode === 'explore'`) spawns `exploreDirections` (default 3) agents, each generating ONE *distinct,
+   boldly committed* full-redesign direction (editorial / terminal / swiss seeds), each handed the
+   `references/direction-brief.md` bold-POV mandate (named font pairing, real palette, depth concept,
+   section rhythm, ONE content-motion technique). Each returns a `DIRECTION_SCHEMA` brief. These are then
+   implemented + captured + judged by the normal per-round tools.
+2. **Tournament — rank on the structural block.** `rankDirections(judges, config)` in `tools/score.mjs`
+   (PURE) scores all N judged directions on the **structural block** (the leap target) and ranks them
+   DESC; `winnerIndex` is the winner. The winner becomes the **new baseline**, and the loop switches back
+   to **refine** mode on it — refining the leap to the satisfaction bar. Any direction beating the prior
+   baseline proves it was the APPROACH (structure + committed POV), not luck on one aesthetic.
+
+### Auto-suggest trigger (the diagnose → explore loop)
+
+When round-0's `diagnosis.structuralBlock < structuralFloor` (config, default 6.0), the loop itself
+RECOMMENDS explore mode — the harness has detected "the BASE structure is the problem, stop tuning the
+backdrop." This closes the diagnose → explore loop: instead of grinding refine rounds on a structural
+plateau, the loop raises its hand and says "leap." Explore is also triggered when the operator passes it
+explicitly. Explore is opt-in / auto-suggested only; the default stays refine (N full redesigns per leap
+is expensive, so it does not fire on its own).
+
 ## Inputs / run config
 
 Invoke `/ui-evolve <target>`. Resolve a run config (a small JSON the skill builds and stores at
@@ -107,6 +134,10 @@ Invoke `/ui-evolve <target>`. Resolve a run config (a small JSON the skill build
 - `structuralWeight` (default 0.5) / `structuralFloor` (default 6.0) — the taste-block weighting and the
   structural-plateau convergence floor (see "Plateau → re-diagnose" above; full schema in
   `references/contract.md`).
+- `mode` (`'refine'` | `'explore'`, default `'refine'`) / `exploreDirections` (default 3) /
+  `directionBrief` (default `references/direction-brief.md`) — the explore-mode keys (see "Explore mode"
+  below). Explore is opt-in; absent/`'refine'` runs today's loop unchanged. Defaults are applied by
+  `resolveExploreConfig` in `tools/score.mjs` (single source of truth).
 - `maxRounds` — hard cap (default 12) so a non-converging loop still terminates and reports.
 
 Evidence is written under `<target>/.ui-evolve/run-<ISO>/round-<N>/` (add `.ui-evolve/` to the
@@ -180,7 +211,10 @@ operator's preference). HOLD at sign-off — do not declare the UI "done" withou
 - `references/rubric.md` — the fixed vision-judge rubric (scoring SSOT).
 - `references/contract.md` — the JSON shapes + CLI contracts every tool/agent reads & writes.
 - `references/judge-prompt.md` — the vision-judge subagent prompt.
-- `references/round-workflow.mjs` — the per-round research+validation Workflow the skill spawns.
+- `references/direction-brief.md` — the bold-POV mandate (forbid generic defaults; demand a committed
+  direction). Handed to the explore-mode direction generators AND the refine synthesize step.
+- `references/round-workflow.mjs` — the per-round research+validation Workflow the skill spawns
+  (refine Lenses→Synthesize, plus the explore `generate-directions` fan-out).
 - `tools/serve.mjs` — boot/poll/teardown the target server.
 - `tools/measure.mjs` — Lighthouse + axe-core + web-vitals + responsive-overflow → `metrics.json`.
 - `tools/capture.mjs` — Playwright screenshots at each breakpoint → `shots/*.png`.

@@ -156,6 +156,60 @@ The per-target `config.json` (under `<target>/.ui-evolve/`) adds:
   `diagnosis.structuralBlock < structuralFloor`. When also passed to `visualOverall` it doubles as the
   optional hard cap (legible-but-empty → `overall ≤ 6.0`); ships OFF as a cap (soft weighting first).
 
+### config schema (explore-mode keys — opt-in / back-compat)
+
+Explore mode is OFF by default; an absent/`{}` config resolves to the existing refine path with NO
+behavioral change. The defaults are applied by `resolveExploreConfig(config)` in `tools/score.mjs` (the
+single source of truth). The per-target `config.json` adds:
+- `mode` (`'refine'` | `'explore'`, default **`'refine'`**) — `'explore'` runs the N-way committed-
+  directions tournament (generate N redesigns → capture → judge → `rankDirections` picks the winner →
+  the loop switches back to refine on the winner). Any other value (or absent) ⇒ refine.
+- `exploreDirections` (number, default **3**) — N: how many distinct committed directions to generate
+  in the explore fan-out. Non-integer / ≤0 ⇒ falls back to 3.
+- `directionBrief` (path, default **`references/direction-brief.md`**) — the bold-POV mandate handed to
+  the direction generators AND the refine synthesize step. The orchestrator reads this file and passes
+  its TEXT to `round-workflow.mjs` via `args.directionBriefText` (the Workflow script never reads files).
+
+## DIRECTION_SCHEMA (explore mode — `references/round-workflow.mjs`)
+
+Each explore-mode agent returns ONE committed full-redesign direction (a complete recipe, not a tweak):
+
+```json
+{
+  "title": "editorial",                 // committed direction name
+  "posture": "warm editorial broadsheet",
+  "fonts": "named display + body pairing (never system/Inter default)",
+  "palette": "accent + full grey ramp + semantic (never indigo-on-white)",
+  "structure": "the depth concept + the section-rhythm plan",
+  "motion": "ONE cohesive content-motion technique",
+  "rationale": "why this committed direction fixes the structural bottleneck"
+}
+```
+
+The explore phase returns `{ mode: "explore", directions: DIRECTION_SCHEMA[] }`.
+
+## rankDirections return shape (`tools/score.mjs`, PURE)
+
+`rankDirections(judges, config)` ranks the N candidate directions' `judge.json` objects on the
+**structural block** (the leap target) — reusing `visualOverall` / `blockMean` / `STRUCTURAL_DIMS`. PURE
+(no I/O, no agent, no Chrome). A structurally-real direction wins even when the legibility six + reported
+`overall` are identical across candidates (a structural-blind ranking would tie).
+
+```json
+{
+  "ranking": [
+    { "index": 1, "structuralBlock": 8.6, "visualOverall": 8.5 },
+    { "index": 2, "structuralBlock": 5.0, "visualOverall": 6.5 },
+    { "index": 0, "structuralBlock": 2.0, "visualOverall": 5.0 }
+  ],
+  "winnerIndex": 1
+}
+```
+
+`ranking` is sorted DESC by `structuralBlock` (tie-broken by `visualOverall`, then original `index`);
+each entry's `index` is the candidate's position in the input array; `winnerIndex` is the top entry's
+`index` (`-1` when there are no candidates).
+
 ## CLIs
 
 ```

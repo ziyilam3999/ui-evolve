@@ -167,6 +167,63 @@ export function tasteVsPrev(judge) {
   return 'equal'
 }
 
+// ── explore mode: N-way committed-directions tournament (taste-bake Phase 3, 2026-06-18) ─────────
+// PURE, additive. The orchestrator generates N committed redesign directions, implements + captures
+// + judges each, then calls rankDirections on the N judge.json objects to pick the winner. Ranking is
+// on the STRUCTURAL block (the leap target) — a structurally-real direction wins even when the
+// legibility six + reported `overall` are identical (a structural-blind ranking would tie).
+
+// mean of the structural block for ONE judge, averaged across its pages (0 when absent / sparse).
+function judgeStructuralBlock(judge) {
+  const b = presentBlockMean(dimAverages(judge), STRUCTURAL_DIMS)
+  return b == null ? 0 : b
+}
+
+// per-judge visualOverall (0–10), averaged across pages: weighted-block when the structural five are
+// present, else the page's reported `overall` (same back-compat fallback as visualScore).
+function judgeVisualOverall(judge, config) {
+  const per = Object.values(judge?.pages || {}).map((p) =>
+    hasStructural(p?.scores) ? visualOverall(p.scores, config || {}) : num(p?.overall),
+  )
+  return per.length ? mean(per) : 0
+}
+
+/**
+ * PURE: rank N candidate judge objects for the explore-mode tournament. No I/O, no agent, no Chrome.
+ * @param {object[]} judges  the N candidate directions' judge.json objects.
+ * @param {object} [config]  { structuralWeight, structuralFloor } passed through to visualOverall.
+ * @returns {{ ranking: {index:number, structuralBlock:number, visualOverall:number}[], winnerIndex:number }}
+ *   `ranking` sorted DESC by structural block (then visualOverall, then index for stability);
+ *   `winnerIndex` is the original index of the top-ranked direction (-1 when no candidates).
+ */
+export function rankDirections(judges, config) {
+  const list = Array.isArray(judges) ? judges : []
+  const scored = list.map((judge, index) => {
+    const sb = judgeStructuralBlock(judge)
+    const vo = judgeVisualOverall(judge, config)
+    return { index, structuralBlock: round1(sb), visualOverall: round1(vo), _sb: sb, _vo: vo }
+  })
+  scored.sort((a, b) => b._sb - a._sb || b._vo - a._vo || a.index - b.index)
+  const ranking = scored.map(({ _sb, _vo, ...r }) => r)
+  return { ranking, winnerIndex: ranking.length ? ranking[0].index : -1 }
+}
+
+/**
+ * PURE: single source of truth for the explore-config defaults. Back-compat: an absent/`{}` config
+ * resolves to the existing refine path. Explore is opt-in (only when `mode:'explore'` is set).
+ * @param {object} [config]  parsed config.json.
+ * @returns {{ mode:'refine'|'explore', exploreDirections:number, directionBrief:string }}
+ */
+export function resolveExploreConfig(config) {
+  const c = config && typeof config === 'object' ? config : {}
+  const mode = c.mode === 'explore' ? 'explore' : 'refine'
+  const n = Number(c.exploreDirections)
+  const exploreDirections = Number.isInteger(n) && n > 0 ? n : 3
+  const directionBrief =
+    typeof c.directionBrief === 'string' && c.directionBrief ? c.directionBrief : 'references/direction-brief.md'
+  return { mode, exploreDirections, directionBrief }
+}
+
 // thresholdsMet: true only if config.thresholds present AND every page clears every bar.
 function computeThresholdsMet(metrics, judge, config) {
   const t = config?.thresholds

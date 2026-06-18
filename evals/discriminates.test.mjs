@@ -10,7 +10,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
-import { computeRound, visualOverall } from '../tools/score.mjs'
+import { computeRound, visualOverall, rankDirections, resolveExploreConfig } from '../tools/score.mjs'
 
 // Clear PASS/FAIL summary line. node:test sets process.exitCode=1 if any test failed; 0 means all
 // passed. This prints AFTER the runner finishes, so it reflects the real outcome.
@@ -384,4 +384,72 @@ test('structuralFloor cap (opt-in) pulls a legible-but-empty page down; OFF by d
   const capped = visualOverall(emptyButLegible, { structuralWeight: 0.5, structuralFloor: 6.0 })
   assert.ok(capped <= 6.0, `floor must cap at 6.0, got ${capped}`)
   assert.ok(soft > capped, `cap must lower the score (soft ${soft} vs capped ${capped})`)
+})
+
+// ── explore mode: N-way committed-directions tournament + config defaults + workflow validity (Phase 3) ──
+
+test('rankDirections — high-structural direction outranks mid/low (ranks on the structural block)', () => {
+  // Three judged directions, all with the SAME healthy legibility six; they differ on the structural five.
+  const high = judgeOf([8, 8, 8, 8, 8, 8], [9, 9, 9, 9, 9], 'committed: deep, cohesive, varied')
+  const mid = judgeOf([8, 8, 8, 8, 8, 8], [5, 5, 5, 5, 5], 'partway there')
+  const low = judgeOf([8, 8, 8, 8, 8, 8], [2, 2, 2, 2, 2], 'flat, generic')
+  const { ranking, winnerIndex } = rankDirections([low, high, mid], { structuralWeight: 0.5 })
+  assert.equal(winnerIndex, 1, `high-structural (input index 1) must win, got ${winnerIndex}`)
+  assert.equal(ranking[0].index, 1, 'top of ranking is the high-structural direction')
+  assert.equal(ranking[1].index, 2, 'mid ranks second')
+  assert.equal(ranking[2].index, 0, 'low ranks last')
+  assert.ok(ranking[0].structuralBlock > ranking[1].structuralBlock, 'ranking is sorted DESC by structural block')
+})
+
+test('rankDirections both-ends — ranks on the structural block, not the reported overall (structural-blind would TIE)', () => {
+  // BOTH candidates carry an IDENTICAL legibility six AND an IDENTICAL reported `overall` (8.0); they
+  // differ ONLY on the structural five. A structural-BLIND ranking (reading only `overall`/legibility)
+  // would TIE them and could not pick a winner -> RED. Ranking on the STRUCTURAL block separates them by
+  // a wide margin -> GREEN. Same both-ends shape as the AC7 structural-only-pair proof above.
+  const structHigh = { pages: { '/': { scores: { hierarchy: 8, spacing: 8, alignment: 8, consistency: 8, affordance: 8, readability: 8, depth: 9, cohesion: 9, rhythm: 9, hierarchyContrast: 9, distinctiveness: 9 }, overall: 8.0 } } }
+  const structLow = { pages: { '/': { scores: { hierarchy: 8, spacing: 8, alignment: 8, consistency: 8, affordance: 8, readability: 8, depth: 2, cohesion: 2, rhythm: 2, hierarchyContrast: 2, distinctiveness: 2 }, overall: 8.0 } } }
+  const { ranking, winnerIndex } = rankDirections([structLow, structHigh], { structuralWeight: 0.5 })
+  assert.equal(winnerIndex, 1, 'high-structural wins despite the identical reported overall (8.0)')
+  assert.ok(
+    ranking[0].structuralBlock - ranking[1].structuralBlock > 5,
+    `structural block must separate the two (${ranking[0].structuralBlock} vs ${ranking[1].structuralBlock})`,
+  )
+})
+
+test('rankDirections — empty input is safe (winnerIndex -1, empty ranking)', () => {
+  const { ranking, winnerIndex } = rankDirections([], { structuralWeight: 0.5 })
+  assert.equal(winnerIndex, -1)
+  assert.equal(ranking.length, 0)
+})
+
+test('resolveExploreConfig — defaults to refine/3/brief-path; explore only when explicitly set', () => {
+  for (const input of [{}, undefined, null, { mode: 'something-else' }]) {
+    const r = resolveExploreConfig(input)
+    assert.equal(r.mode, 'refine', `mode should default to refine for ${JSON.stringify(input)}`)
+    assert.equal(r.exploreDirections, 3, 'exploreDirections defaults to 3')
+    assert.equal(r.directionBrief, 'references/direction-brief.md', 'directionBrief defaults to the brief path')
+  }
+  const ex = resolveExploreConfig({ mode: 'explore', exploreDirections: 5, directionBrief: 'custom/brief.md' })
+  assert.equal(ex.mode, 'explore')
+  assert.equal(ex.exploreDirections, 5)
+  assert.equal(ex.directionBrief, 'custom/brief.md')
+  // Bad exploreDirections (non-integer / <=0) falls back to 3.
+  assert.equal(resolveExploreConfig({ exploreDirections: 0 }).exploreDirections, 3)
+  assert.equal(resolveExploreConfig({ exploreDirections: 2.5 }).exploreDirections, 3)
+})
+
+test('workflow-validity — round-workflow.mjs is valid inside the runtime async-fn wrapper', () => {
+  // A BARE `node --check references/round-workflow.mjs` FAILS by design (the file legally uses top-level
+  // `await`/`return` + injected globals — the same reason scripts/lint.mjs skips *-workflow.mjs). The
+  // achievable validity guarantee is the WRAPPED check: the Workflow runtime wraps the body in an async
+  // function. We reproduce that here by stripping the module `export` keyword (the runtime hoists `meta`
+  // separately) and constructing the body as an async-function body via the AsyncFunction constructor —
+  // which parses (but does not execute) it, throwing a SyntaxError if the workflow body is malformed.
+  const src = readFileSync(new URL('../references/round-workflow.mjs', import.meta.url), 'utf8')
+  const body = src.replace(/^[ \t]*export[ \t]+/gm, '') // strip `export ` so the body is wrappable
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+  assert.doesNotThrow(
+    () => new AsyncFunction(body),
+    'round-workflow.mjs must be syntactically valid as the body of the runtime async-fn wrapper',
+  )
 })
