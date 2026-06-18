@@ -41,8 +41,11 @@ required (a green metric with worse-looking pixels is still a regression, and vi
      or content clipping at any breakpoint.
 2. **Visual judgment, systematized** (the eyeball gate made repeatable — a vision subagent):
    - Real Playwright screenshots at each breakpoint for each page.
-   - Scored against the fixed rubric in `references/rubric.md` (hierarchy, spacing, alignment,
-     consistency, affordance, readability — 0–10 each).
+   - Scored against the fixed rubric in `references/rubric.md` — **eleven** dims in two blocks: a
+     **legibility** block (hierarchy, spacing, alignment, consistency, affordance, readability) and a
+     **structural** block (depth, cohesion, rhythm, hierarchyContrast, distinctiveness), 0–10 each. The
+     `overall` is a weighted blend (`structuralWeight`, default 0.5) whose opposing dims make the score
+     **peak in the sweet spot** — neither a cluttered nor an empty page can max it.
    - **Before-vs-after must show IMPROVEMENT, not just change.** The judge is shown the prior
      accepted screenshot alongside the candidate and must say which is better and why.
 3. **Regression guard** (`tools/regression.mjs` + the project's own tests):
@@ -73,6 +76,19 @@ The loop stops proposing when ALL of:
 - **Diminishing returns:** round-score gain < `epsilon` (default 2.0 pts / 100) for `N` (default 2)
   consecutive accepted rounds — further effort isn't buying improvement.
 
+### Plateau → re-diagnose (do NOT converge on a structural plateau)
+
+`score.mjs` emits a `diagnosis` block in **every** `round.json`:
+`{ weakestDims, bottleneckBlock, structuralBlock, legibilityBlock }`. On plateau (gain < `epsilon` for
+`plateauRounds`), **do NOT declare converged if `diagnosis.bottleneckBlock === "structural"` AND
+`diagnosis.structuralBlock < structuralFloor`** (config, default 6.0). A structural plateau means the
+loop has been hill-climbing the WRONG layer (the decorative backdrop, not the base structure) — the
+recipe's META: *when rounds tie / "still not it", the cause is the WRONG target; re-validate the
+diagnosis before iterating harder.* Instead: emit the diagnosis (e.g. "weakest = distinctiveness, rhythm
+→ the BASE structure is the bottleneck, not the backdrop") and require the next round's candidate to
+**target a named structural dim** from `weakestDims`. Converge ONLY when plateaued AND `structuralBlock`
+clears the floor (genuinely good structure, not merely legible-but-empty).
+
 Then it **HOLDS** and surfaces a before/after evidence pack (baseline vs final: metrics table +
 side-by-side screenshots + per-round changelog) for the **operator's final sign-off**. "Satisfied"
 is ultimately the operator's call; the loop's job is to reach a defensible plateau and prove it.
@@ -88,6 +104,9 @@ Invoke `/ui-evolve <target>`. Resolve a run config (a small JSON the skill build
 - `pages` — routes to evaluate (e.g. `["/"]`; add more as the site grows).
 - `breakpoints` — `[{name:"mobile",width:390,height:844},{name:"tablet",width:834,height:1112},{name:"desktop",width:1440,height:900}]`.
 - `thresholds` / `epsilon` / `plateauRounds` — the satisfaction bar above (override per target).
+- `structuralWeight` (default 0.5) / `structuralFloor` (default 6.0) — the taste-block weighting and the
+  structural-plateau convergence floor (see "Plateau → re-diagnose" above; full schema in
+  `references/contract.md`).
 - `maxRounds` — hard cap (default 12) so a non-converging loop still terminates and reports.
 
 Evidence is written under `<target>/.ui-evolve/run-<ISO>/round-<N>/` (add `.ui-evolve/` to the
@@ -127,7 +146,9 @@ target's `.gitignore` — it is scratch, not product).
      in `round.json`, and mark that candidate `rejected` in the backlog so it isn't retried blindly.
 5. **Log** — every round writes its evidence; the run keeps a `changelog.md` (round, candidate,
    decision, deltas). Never silently drop a tried-and-rejected idea — it's logged.
-6. **Converge check** — if the satisfaction bar is met → stop and assemble the sign-off pack.
+6. **Converge check** — if the satisfaction bar is met → stop and assemble the sign-off pack, BUT honor
+   the structural-plateau exception (above): do not converge on a structural plateau — read
+   `round.json.diagnosis` and target a named structural dim next round instead.
    Else if `maxRounds` hit → stop and report honestly (what's still below threshold + why).
    Else → next round.
 

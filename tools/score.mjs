@@ -27,6 +27,36 @@ const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n))
 const round1 = (n) => Math.round(n * 10) / 10
 const num = (v, def = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : def)
 const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0)
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v)
+
+// ── visual-judge dimension blocks (taste-validation bake, 2026-06-18) ───────────
+// The judge scores ELEVEN dims, split into two OPPOSING blocks so the weighted overall
+// PEAKS in the sweet spot (neither a busy nor an empty page maxes the structural block).
+//   legibility  = can you read/use it (correctness; the original six).
+//   structural  = is it deep / cohesive / varied / committed (taste; the new five).
+const LEGIBILITY_DIMS = ['hierarchy', 'spacing', 'alignment', 'consistency', 'affordance', 'readability']
+const STRUCTURAL_DIMS = ['depth', 'cohesion', 'rhythm', 'hierarchyContrast', 'distinctiveness']
+
+// A page carries the structural block only when ALL five structural dims are present numbers.
+// Sparse / round-0 / legacy judge.json (legibility-only) returns false -> back-compat fallback.
+const hasStructural = (scores) => !!scores && STRUCTURAL_DIMS.every((d) => isNum(scores[d]))
+
+const blockMean = (scores, dims) => mean(dims.map((d) => num(scores?.[d])))
+
+/**
+ * visualOverall(scores, {structuralWeight, structuralFloor}) -> 0–10 weighted-block score.
+ * = structuralWeight*structuralBlock + (1-structuralWeight)*legibilityBlock  (default 0.5/0.5).
+ * Optional structuralFloor (default OFF/undefined): if set AND structuralBlock < floor, cap the
+ * result at 6.0 — the cleanest single encoding of "legible-but-empty is not good". Ships OFF.
+ */
+export function visualOverall(scores, { structuralWeight = 0.5, structuralFloor } = {}) {
+  const w = isNum(structuralWeight) ? clamp(structuralWeight, 0, 1) : 0.5
+  const structural = blockMean(scores, STRUCTURAL_DIMS)
+  const legibility = blockMean(scores, LEGIBILITY_DIMS)
+  let overall = w * structural + (1 - w) * legibility
+  if (isNum(structuralFloor) && structural < structuralFloor) overall = Math.min(overall, 6.0)
+  return overall
+}
 
 // objective sub-score (0–100) for a single page's metrics entry.
 function pageObjective(page) {
@@ -55,11 +85,86 @@ function objectiveScore(metrics) {
   return per.length ? mean(per) : 0
 }
 
-// visual (0–100) = judge.overall * 10, averaged across all pages in judge.json.
-function visualScore(judge) {
+// visual (0–100), averaged across all pages in judge.json. Per page: when the structural block
+// is present, recompute overall from the weighted blocks (visualOverall) so taste moves the score;
+// else fall back to the page's reported `overall` (sparse / round-0 / legacy back-compat).
+function visualScore(judge, config) {
   const pages = judge?.pages || {}
-  const per = Object.values(pages).map((p) => num(p?.overall) * 10)
+  const per = Object.values(pages).map((p) =>
+    hasStructural(p?.scores) ? visualOverall(p.scores, config || {}) * 10 : num(p?.overall) * 10,
+  )
   return per.length ? mean(per) : 0
+}
+
+// per-dim averages across all pages (only dims actually present, so sparse inputs stay honest).
+function dimAverages(judge) {
+  const pages = Object.values(judge?.pages || {})
+  const acc = {}
+  for (const p of pages) {
+    const s = p?.scores || {}
+    for (const dim of [...LEGIBILITY_DIMS, ...STRUCTURAL_DIMS]) {
+      if (isNum(s[dim])) {
+        acc[dim] = acc[dim] || { sum: 0, count: 0 }
+        acc[dim].sum += s[dim]
+        acc[dim].count += 1
+      }
+    }
+  }
+  const out = {}
+  for (const [dim, { sum, count }] of Object.entries(acc)) out[dim] = sum / count
+  return out
+}
+
+const presentBlockMean = (avgs, dims) => {
+  const vals = dims.filter((d) => isNum(avgs[d])).map((d) => avgs[d])
+  return vals.length ? mean(vals) : null
+}
+
+// weakestDims(judge, n): the n lowest-scoring dims across BOTH blocks, each tagged with its block.
+// Drives plateau re-diagnosis ("the weakest layer is structural -> stop tuning the backdrop").
+export function weakestDims(judge, n = 2) {
+  const avgs = dimAverages(judge)
+  const tagged = Object.entries(avgs).map(([dim, score]) => ({
+    dim,
+    score: round1(score),
+    block: STRUCTURAL_DIMS.includes(dim) ? 'structural' : 'legibility',
+  }))
+  tagged.sort((a, b) => a.score - b.score)
+  return tagged.slice(0, Math.max(0, n))
+}
+
+// diagnosis emitted EVERY round: which block is the bottleneck + its two weakest dims, so the
+// next round always has a NAMED target (and SKILL.md can refuse to converge on a structural plateau).
+function buildDiagnosis(judge) {
+  const avgs = dimAverages(judge)
+  const structuralBlock = presentBlockMean(avgs, STRUCTURAL_DIMS)
+  const legibilityBlock = presentBlockMean(avgs, LEGIBILITY_DIMS)
+  let bottleneckBlock = null
+  if (structuralBlock != null && legibilityBlock != null) {
+    bottleneckBlock = structuralBlock <= legibilityBlock ? 'structural' : 'legibility'
+  } else if (structuralBlock != null) bottleneckBlock = 'structural'
+  else if (legibilityBlock != null) bottleneckBlock = 'legibility'
+  return {
+    weakestDims: weakestDims(judge, 2),
+    bottleneckBlock,
+    structuralBlock: structuralBlock == null ? null : round1(structuralBlock),
+    legibilityBlock: legibilityBlock == null ? null : round1(legibilityBlock),
+  }
+}
+
+// taste aggregator (mirrors judgeBetterThanPrev): 'worse' if ANY page reports a taste regression.
+export function tasteVsPrev(judge) {
+  const pages = judge?.pages || {}
+  let sawWorse = false
+  let sawBetter = false
+  for (const page of Object.values(pages)) {
+    const t = page?.tasteVsPrev
+    if (t === false || t === 'worse') sawWorse = true
+    else if (t === true || t === 'better') sawBetter = true
+  }
+  if (sawWorse) return 'worse'
+  if (sawBetter) return 'better'
+  return 'equal'
 }
 
 // thresholdsMet: true only if config.thresholds present AND every page clears every bar.
@@ -144,7 +249,7 @@ function firstCandidate(judge) {
  */
 export function computeRound({ metrics, judge, regression, prev, config, buildPass } = {}) {
   const objective = objectiveScore(metrics)
-  const visual = visualScore(judge)
+  const visual = visualScore(judge, config)
   const roundScore = round1(0.5 * objective + 0.5 * visual)
 
   const hasPrev = prev != null && typeof prev === 'object'
@@ -153,6 +258,8 @@ export function computeRound({ metrics, judge, regression, prev, config, buildPa
   const thresholdsMet = computeThresholdsMet(metrics, judge, config)
   const candidate = firstCandidate(judge)
   const roundNumber = num(metrics?.round, hasPrev ? num(prev.round) + 1 : 0)
+  // emitted EVERY round so the next round always has a named structural/legibility target.
+  const diagnosis = buildDiagnosis(judge)
 
   // ── round 0 (no prev): baseline, no accept/revert ─────────────────────────────
   if (!hasPrev) {
@@ -167,6 +274,7 @@ export function computeRound({ metrics, judge, regression, prev, config, buildPa
       decision: 'baseline',
       rationale: 'Round 0 baseline: first measured UI, nothing to accept or revert against.',
       candidate,
+      diagnosis,
     }
   }
 
@@ -220,10 +328,15 @@ export function computeRound({ metrics, judge, regression, prev, config, buildPa
   const buildOk = buildPass !== false
   if (!buildOk) reasons.push('target build/test/smoke did not exit 0')
 
-  const accepted = deltaOk && !lhRegressed && !newAxe && !regressionBlocks && buildOk
+  // 6) a TASTE regression blocks accept even if the objective half improved — the judge's
+  // pixel-grounded tasteVsPrev is the oracle for "it got uglier" (a busier/emptier redesign).
+  const tasteRegressed = tasteVsPrev(judge) === 'worse'
+  if (tasteRegressed) reasons.push('taste regressed vs prev (judge tasteVsPrev = worse)')
+
+  const accepted = deltaOk && !lhRegressed && !newAxe && !regressionBlocks && buildOk && !tasteRegressed
   const decision = accepted ? 'accept' : 'revert'
   const rationale = accepted
-    ? `Accepted: roundScore rose by ${delta} with no Lighthouse regression beyond tolerance, no new axe critical/serious, no unintended large visual diff, and build passing.`
+    ? `Accepted: roundScore rose by ${delta} with no Lighthouse regression beyond tolerance, no new axe critical/serious, no unintended large visual diff, no taste regression, and build passing.`
     : `Reverted: ${reasons.join('; ')}.`
 
   return {
@@ -237,6 +350,7 @@ export function computeRound({ metrics, judge, regression, prev, config, buildPa
     decision,
     rationale,
     candidate,
+    diagnosis,
   }
 }
 
